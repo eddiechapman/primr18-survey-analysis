@@ -1,0 +1,497 @@
+---
+title: "PRIM&R 18 Survey Analysis"
+author: "Eddie Chapman"
+date: "12/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, 
+  warning = FALSE, 
+  error = FALSE, 
+  cache = TRUE)
+```
+
+```{r library, message = FALSE}
+library(ggthemes)
+library(RColorBrewer)
+library(tidyverse)
+```
+
+```{r}
+survey <- read_csv("data/prim&r18.csv") %>%
+  select("response_id" = "ResponseId", "6":"Q133")
+  
+  
+survey
+```
+
+```{r}
+tail(names(survey))
+
+survey <- rename_all(survey, funs(str_replace(., "Q", "")))
+
+tail(names(survey))
+```
+
+```{r}
+nrow(survey)
+
+survey <- survey %>%
+  semi_join(tibble("response_id" = read_lines("data/valid_responses.txt")))
+
+nrow(survey)
+```
+
+```{r}
+head(survey$"70")
+
+survey <- survey %>%
+  mutate_all(~na_if(., "0")) %>%
+  mutate_all(~na_if(., "-99"))
+
+head(survey$"70")
+```
+
+
+
+```{r}
+survey <- survey %>%
+  rename("institution" = "6") %>%
+  mutate(institution = fct_recode(institution, 
+    "school" = "A school, college, or university",
+    "for-profit" = "A non-school for-profit organization",
+    "non-profit" = "A non-school non-profit organization",
+    "government" = "A non-school governmental organization",
+    "other" = "Other:"))
+
+survey$institution
+```
+
+```{r}
+survey <- survey %>%
+  rename("irb_concerns" = "7") %>%
+  mutate(irb_concerns = fct_recode(irb_concerns, 
+    "academic" = "Academic research",
+    "corporate" = "Corporate research",
+    "government" = "Government research",
+    "non-profit" = "Not-for-profit research",
+    "other" = "Other:"))
+
+survey$irb_concerns
+```
+
+```{r}
+survey <- survey %>%
+  rename("academic_institution" = "8") %>%
+  mutate(academic_institution = fct_recode(academic_institution, 
+    "r1" = "R1",
+    "r2" = "R2",
+    "r3" = "R3",
+    "liberal arts" = "Liberal Arts",
+    "community college" = "Community College"))
+
+survey$academic_institution
+```
+
+
+
+```{r}
+# survey <- survey %>%
+#   pivot_longer(starts_with("9_"), values_to = "role") %>%
+#   mutate(role = fct_recode(role,
+#     "ethical review" = "Ethical review",
+#     "conducting research" = "Conducting research",
+#     "executive/university admin" = "Executive/University administration"))
+# 
+# survey$role
+```
+
+
+```{r}
+survey  %>%
+  pivot_longer("10_1":"10_2", values_to = "role_research") %>%
+  mutate(role_research = factor(str_to_lower(.))) %>%
+  select(role_research)
+```
+
+
+```{r}
+
+```
+
+## Data import 
+
+Load the survey data (`prim&r18.csv`).
+
+Filter out any responses that are not included in the list of completed survey IDs (`valid_responses.txt`). 
+
+```{r import}
+valid <- read_lines("data/valid_responses.txt") %>%
+  as.tibble()
+
+survey <- read_csv("data/prim&r18.csv") %>%
+  semi_join(valid, by = c("ResponseId" = "value")) %>%
+  select("response_id" = "ResponseId", "3":"Q133") %>%
+  rename("institution" = "6") %>%
+  mutate(institution = fct_recode(institution, 
+    NULL = "-99",
+    "school" = "A school, college, or university",
+    "for-profit" = "A non-school for-profit organization",
+    "non-profit" = "A non-school non-profit organization",
+    "government" = "A non-school governmental organization"))
+
+rm(valid)
+  
+survey
+```
+
+## Visualization
+
+### Protocols with pervasive data?
+
+Question 70
+
+"How many protocols involing pervaisve data does your IRB review annually?"
+
+Bar chart 
+
+Color by institution type?
+
+```{r}
+question <- "How many protocols involing pervasive data does your IRB review annually?"
+
+q70 <- survey %>%
+  select("protocols" = "70") %>%
+  filter(!str_detect(protocols, "-99")) %>%
+  mutate(protocols = factor(protocols, levels = c("0", "1-10", "20-50", "More than 50")))
+
+q70
+```
+
+```{r}
+ggplot(q70, aes(protocols)) +
+  geom_bar()
+```
+
+### Prepared for pervasive data protocols?
+
+Question 74 choice 2 & 3
+
+Likert scale bar charts
+
+http://rnotr.com/likert/ggplot/barometer/likert-plots/
+
+I believe...
+
+"...IRB members at my institution are well-versed in the __technical aspects__ of the collection/use of prevasive data"
+
+"...IRB members at my institution are well-versed in the __ethical aspects__ of the collection/use of prevasive data"
+
+```{r}
+pal <- brewer.pal(5, "RdBu") 
+pal[3] <- "#DFDFDF"
+
+labels <- c("Strongly disagree", 
+            "Somewhat disagree", 
+            "Neither agree nor disagree", 
+            "Somewhat agree",
+            "Strongly agree")
+
+palette <- tibble(response = factor(labels), 
+                  color = factor(pal))
+
+q74 <- survey %>%
+  select("technical" = "74_2",
+         "ethical" = "74_3") %>%
+  pivot_longer(cols = technical:ethical,
+               names_to = "consideration",
+               values_to = "response") %>%
+  mutate(consideration = as.factor(consideration),
+         response = factor(response, c("Strongly disagree", 
+                                       "Somewhat disagree", 
+                                       "Neither agree nor disagree", 
+                                       "Somewhat agree",  
+                                       "Strongly agree"))) %>%
+  filter(!is.na(response)) %>%
+  add_count(consideration) %>%
+  add_count(consideration, response, name = "n_response") %>%
+  mutate(percent = n_response / n) %>%
+  select(consideration, response, percent) %>%
+  distinct() %>%
+  left_join(palette) %>%
+  arrange(consideration, response)
+  
+q74
+```
+
+
+
+```{r}
+lows <- q74 %>%
+  filter(response %in% c("Strongly disagree", 
+                         "Somewhat disagree", 
+                         "Neither agree nor disagree")) %>%
+  mutate(percent = ifelse(str_detect(response, "Neither agree nor disagree"),
+                          percent / 2, percent),
+         percent = as.integer(percent * 100),
+         response = factor(response, c("Neither agree nor disagree",
+                                       "Somewhat disagree", 
+                                       "Strongly disagree")),
+         color = factor(color, levels = c("#CA0020", "#F4A582", "#DFDFDF"))) 
+
+lows
+
+highs <- q74 %>%
+  filter(response %in% c("Neither agree nor disagree", 
+                         "Somewhat agree",
+                         "Strongly agree")) %>%
+  mutate(percent = ifelse(str_detect(response, "Neither agree nor disagree"),
+                          percent / 2, percent),
+         percent = as.integer(percent * 100),
+         response = factor(response, c("Neither agree nor disagree",
+                                       "Somewhat agree", 
+                                       "Strongly agree")))
+
+highs
+```
+
+```{r}
+ggplot() + 
+  geom_bar(data = highs, 
+           aes(x = consideration, y = percent, fill = color),
+           position = "stack", 
+           stat = "identity",
+           width = 0.5) +
+  geom_bar(data = lows, 
+           aes(x = consideration, y = -percent, fill = color),
+           position = "stack", 
+           stat = "identity", 
+           width = 0.5) +
+  geom_hline(yintercept = 0, 
+             color = c("white")) +
+  scale_fill_identity("",
+                      labels = labels, 
+                      breaks = palette, 
+                      guide = "legend") + 
+  theme_fivethirtyeight() +
+  coord_flip() +
+  labs(title = "Prepared for pervasive data protocols?", 
+       subtitle = "I believe that IRB members at my institution are well-versed in the \n (technical, ethical) aspects of the collection/use of prevasive data", 
+       y = "", x = "") +
+  theme(plot.title = element_text(size = 14, hjust = 2),
+        plot.subtitle = element_text(size = 12, face = "italic", hjust = 0),
+        axis.text.y = element_text(size = 11, face = "bold", hjust = 0),
+        legend.position = "right", 
+        legend.direction = "vertical",
+        legend.key.size = unit(.5, "cm"),
+        legend.text = element_text(size = 11)) +
+  scale_y_continuous(breaks = seq(-100 , 100, 25), 
+                     limits = c(-75, 75))
+```
+
+### Guidelines for pervasive data protocols? 
+
+Question 75
+
+"Does your IRB have a specific checklist, review tool, policy or guidelines for reviewing protocols that rely on pervaisve data?"
+
+```{r}
+question <- "Does your IRB have a specific checklist, review tool, policy or guidelines for reviewing protocols that rely on pervaisve data?"
+```
+
+Question 78
+
+"In reviewing protocols relying on pervasive data, which regulations or guidelines do you consult or rely on, if any?"
+
+```{r}
+question <- "In reviewing protocols relying on pervasive data, which regulations or guidelines do you consult or rely on, if any?"
+```
+
+### Case Study 1
+
+#### Q136
+
+We would now like you to consider the following case studies, and answer questions about each using your professional judgment.
+
+Researchers plan to scrape public comments from online newspaper pages to predict election outcomes. They will aggregate their analysis to determine public sentiment. The researchers don’t plan to inform commenters, and they plan to collect potentially-identifiable user names. Scraping comments violates the newspaper’s terms of service.
+
+#### Q137 
+
+Your institution’s IRB would likely consider this proposal to be:
+
+    • Not human subjects research  (1) 
+    • Exempt  (2) 
+    • Expedited  (3) 
+    • Requiring full board review  (4) 
+
+#### Q138 
+
+In this case, what would be the key factor(s) in making that determination? (check all that apply)
+
+    • Public vs. private site  (1) 
+    • Public vs. private data  (2) 
+    • Level of analysis (group vs. individual)  (3) 
+    • Whether data is identifiable  (4) 
+    • Whether data gathering violates terms of service  (5) 
+    • Whether data is reused  (6) 
+    • Whether the project combines datasets  (7) 
+    • Method of obtaining data  (8) 
+    • Type of data  (9) 
+    • Whether informed consent was obtained  (10) 
+    • Purpose of the research  (11) 
+    • Impact beyond the participants  (12) 
+    • Other [please explain]:  (13) ________________________________________________
+
+
+#### Q139 
+
+In the above question you were asked how you felt your institution would consider this project. Now, in your personal opinion, do you think this project deserves:
+
+    • More oversight  (4) 
+    • Same oversight  (5) 
+    • Less oversight  (6) 
+
+
+
+#### Q140 
+
+> Display This Question:
+> If Are there ethical concerns that you can identify, but would fall outside of the purview of an IRB... = Yes
+
+Are there ethical concerns that you can identify, but would fall outside of the purview of an IRB review?
+
+    • No  (1) 
+    • Yes  (2) 
+
+
+```{r}
+status_levels <- c("Not human subjects research",
+                   "Exempt",
+                   "Expedited",
+                   "Requiring full board review")
+
+factor_levels <- c("Public vs. private site",
+                   "Public vs. private data",
+                   "Level of analysis (group vs. individual)",
+                   "Whether data is identifiable",
+                   "Whether data gathering violates terms of service",
+                   "Whether data is reused",
+                   "Whether the project combines datasets",
+                   "Method of obtaining data",
+                   "Type of data",
+                   "Whether informed consent was obtained",
+                   "Purpose of the research",
+                   "Impact beyond the participants",
+                   "Other [please explain]:")
+
+oversight_levels <- c("More oversight",
+                      "Same oversight",
+                      "Less oversight")
+
+case1 <- survey %>%
+  select(institution,
+         "status" = "Q137", 
+         "Q138_1":"Q138_13", 
+         "oversight" = "Q139") %>%
+  pivot_longer(starts_with("Q138"), values_to = "factor") %>%
+  mutate(status = na_if(status, "-99"),
+         status = na_if(status, "0"),
+         factor = na_if(factor, "-99"),
+         factor = na_if(factor, "0"),
+         oversight = na_if(oversight, "-99"),
+         oversight = na_if(oversight, "0")) %>%
+  select(institution, status, factor, oversight) %>%
+  filter(!is.na(status), !is.na(factor), !is.na(oversight)) %>%
+  mutate(status = factor(status, status_levels),
+         factor = factor(factor, factor_levels),
+         oversight = factor(oversight, oversight_levels))
+
+case1
+```
+
+```{r}
+case1 %>%
+  select(status, factor) %>%
+  filter(factor != "Other [please explain]:") %>%
+  group_by(status) %>%
+  add_count(factor) %>%
+  add_count(status, name = "n_status") %>%
+  mutate(percent = (n / n_status) * 100) %>%
+  distinct() %>%
+  arrange(status, factor) %>%
+  ggplot(aes(factor, percent, fill = status)) +
+  # geom_segment(aes(x = factor, xend = factor, y = 0, yend = percent), position = "dodge2") +
+  # geom_point(size = 1, alpha = 0.6, position = "dodge2") +
+  geom_col(width = 0.5, position = position_dodge()) +
+  #facet_wrap(~status, ncol = 4) +
+  coord_flip()
+
+```
+
+### Case Study 2
+
+#### 19 
+
+We would now like you to consider the following case studies, and answer questions about each using your professional judgment.
+
+Researchers plan to scrape public Twitter feeds to predict risky drug-use behaviors. They will analyze individual behaviors. The researchers don’t plan to inform Twitter users, but they will not collect any identifying information. Scraping Tweets does not violate Twitter’s terms of service.
+
+#### 20 
+
+Your institution’s IRB would likely consider this proposal to be:
+
+    • Not human subjects research  (1) 
+    • Exempt  (2) 
+    • Expedited  (3) 
+    • Requiring full board review  (4) 
+
+#### 21 
+
+In this case, what would be the key factor(s) in making that determination? (check all that apply)
+
+    • Public vs. private site  (1) 
+    • Public vs. private data  (2) 
+    • Level of analysis (group vs. individual)  (3) 
+    • Whether data is identifiable  (4) 
+    • Whether data gathering violates terms of service  (5) 
+    • Whether data is reused  (6) 
+    • Whether the project combines datasets  (7) 
+    • Method of obtaining data  (8) 
+    • Type of data  (9) 
+    • Whether informed consent was obtained  (10) 
+    • Purpose of the research  (11) 
+    • Impact beyond the participants  (12) 
+    • Other [please explain]:  (13) ________________________________________________
+
+
+
+#### Q111 
+
+In the above question you were asked how you felt your institution would consider this project. Now, in your personal opinion, do you think this project deserves:
+
+    • More oversight  (4) 
+    • Same oversight  (5) 
+    • Less oversight  (6) 
+
+
+#### Q114 
+
+Are there ethical concerns that you can identify, but would fall outside of the purview of an IRB review?
+
+    • No  (1) 
+    • Yes  (2) 
+
+
+Display This Question:
+If Are there ethical concerns that you can identify, but would fall outside of the purview of an IRB... = Yes
+
+#### Q115 
+
+If yes, please explain: 
+________________________________________________________________
+________________________________________________________________
+________________________________________________________________
+________________________________________________________________
+________________________________________________________________
