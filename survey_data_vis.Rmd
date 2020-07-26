@@ -260,7 +260,7 @@ Save the plot to device.
 
 ```{r}
 ppi <- 300
-png("likert_plot_with_researchers.png", width = 7 * ppi, height = 4 * ppi, res = ppi)
+png("plots/likert_plot_with_researchers.png", width = 7 * ppi, height = 4 * ppi, res = ppi)
 p
 dev.off()
 ```
@@ -322,7 +322,7 @@ p2 <- ggplot() +
                      limits = c(-75, 75))
 
 ppi <- 300
-png("likert_plot_no_researchers.png", width = 7 * ppi, height = 4 * ppi, res = ppi)
+png("plots/likert_plot_no_researchers.png", width = 7 * ppi, height = 4 * ppi, res = ppi)
 p2
 dev.off()
 ```
