@@ -1,0 +1,384 @@
+---
+title: "Survey Data Visualization"
+output:
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r}
+library(ggthemes)
+library(knitr)
+library(RColorBrewer)
+library(tidyverse)
+```
+
+
+# Functions
+
+```{r}
+bar_plot <- function(df, field, title, subtitle) {
+  
+  field <- enquo(field)
+  
+  if(missing(title)) { 
+    title = field 
+  }
+  
+  if(missing(subtitle)) {
+    subtitle = ""
+  }
+  
+  df %>% 
+    drop_na(!! field) %>%
+    ggplot(aes(!! field)) +
+    geom_bar() +
+    guides(fill = FALSE, color = FALSE) +
+    labs(x = NULL, 
+         y = "Responses",
+         title = title, 
+         subtitle = subtitle)
+}
+
+
+text_responses <- function(df, field) {
+  
+  field <- enquo(field)
+  
+  df %>%
+    select(!! field) %>%
+    drop_na(!! field) %>%
+    kable()
+}
+
+```
+
+```{r}
+survey <- read_rds('data/survey_data.rds')
+head(survey)
+```
+# Survey
+
+## Institution
+
+### Organization type
+
+```{r}
+bar_plot(survey, org_type, title = "Organization Type", subtitle = )
+```
+
+"Other" responses:
+
+```{r echo = FALSE}
+text_responses(survey, org_type_text)
+```
+
+### IRB ethics primary concern
+
+```{r}
+bar_plot(survey, 
+         irb_ethics_primary_concern, 
+         title = "IRB Ethics Concerns", 
+         subtitle = "My IRB/ethics concerns are primarily focused on...")
+```
+
+"Other" responses:
+```{r echo = FALSE}
+text_responses(survey, irb_ethics_primary_concern_text)
+```
+
+### Academic institution type
+
+```{r}
+bar_plot(survey, academic_institution_type, "Academic Institution Type")
+```
+
+## Personal Experience
+
+### Roles
+
+```{r}
+
+```
+
+### Academic research type
+
+```{r}
+bar_plot(survey, 
+         academic_research_type, 
+         title = "Academic Research Type", 
+         subtitle = "The type of research I primarily review/oversee is primarily...")
+```
+
+### Annual pervasive protocols
+
+
+```{r}
+bar_plot(survey, 
+         annual_pervasive_protocols, 
+         title = "Number of pervasive protocols reviewed", 
+         subtitle = "How many protocols involving pervasive data does your IRB review annually?")
+```
+
+
+### Percentages 
+
+```{r}
+
+```
+
+
+### Reviewed pervasive data types
+
+```{r}
+
+```
+
+"Other" text:
+
+```{r}
+text_responses(survey, reviewed_other_text)
+```
+
+### Most pervasive data disciplines
+
+```{r}
+text_responses(survey, most_pervasive_data_in_other_text)
+```
+
+
+## IRB Policy
+
+### Confidence likert questions
+
+Set up the color palette.
+
+```{r}
+pal = brewer.pal(5, "RdBu")
+pal[3] <- "#DFDFDF"  # A little brighter
+
+likert <- c("strongly disagree", 
+            "somewhat disagree", 
+            "neither agree nor disagree",
+            "somewhat agree", 
+            "strongly agree")
+                 
+
+palette <- tibble(response = factor(likert, levels = likert, ordered = TRUE),
+                  color = factor(pal, ordered = TRUE))
+```
+
+Divide the responses into `high` and `low` dataframes. Half of the "neither agree nor disagree" responses will be in each. This allows the middle point to be centered for comparison between questions.
+
+```{r}
+confidence <- survey %>%
+  select("irb_members_ethical" = "confidence_irb_members_pervasive_data_ethical",
+         "irb_members_technical" = "confidence_irb_members_pervasive_data_technical",
+         "researchers_ethical" = "confidence_researchers_pervasive_data_ethical") %>%
+  pivot_longer(cols = irb_members_ethical:researchers_ethical, 
+               names_to = "consideration", 
+               names_ptypes = list("consideration", factor()),
+               values_to = "response",
+               values_ptypes = list("response", factor())) %>%
+  drop_na() %>%
+  group_by(consideration, response) %>%
+  summarise(n = n()) %>%
+  mutate(freq = n / sum(n)) %>%
+  ungroup() %>%
+  left_join(palette, by = c('response'))
+
+confidence_low <- confidence %>%
+  filter(response %in% levels(response)[1:3]) %>%
+  mutate(freq = ifelse(str_detect(response, levels(response)[3]), freq / 2, freq),
+         freq = as.integer(round(freq * 100), 2),
+         response = factor(response),
+         color = factor(color, levels = c("#CA0020", "#F4A582", "#DFDFDF")))
+
+confidence_high <- confidence %>%
+  filter(response %in% levels(response)[3:5]) %>%
+  mutate(freq = ifelse(str_detect(response, levels(response)[3]), freq / 2, freq),
+         freq = as.integer(round(freq * 100), 2))
+```
+
+#### All three likert questions
+
+Plot likert data for all three question responses.
+
+```{r}
+title <- "Prepared for pervasive data protocols?"
+subtitle <- "I believe that (IRB members, researchers) at my institution are well-versed\nin the (technical, ethical) aspects of the collection/use of pervasive data."
+
+p <- ggplot() +
+  
+  geom_bar(data = confidence_high,
+           aes(x = factor(consideration), y = freq, fill = factor(color)),
+           position = "stack", 
+           stat = "identity", 
+           width = 0.5) +
+  
+  geom_bar(data = confidence_low,
+           aes(x = factor(consideration), y = -freq, fill = factor(color)),
+           position = "stack", 
+           stat = "identity", 
+           width = 0.5) +
+  
+  geom_hline(yintercept = 0, color = c("white")) +
+  
+  scale_x_discrete(breaks = c("researchers_ethical", "irb_members_technical", "irb_members_ethical"),
+                   labels = c("Researchers,\nethical", "IRB members,\ntechnical", "IRB members,\nethical")) +
+  
+  scale_fill_identity(name = "Percent respondents (n = 76)", 
+                      labels = rev(c("Strongly disagree", 
+                                     "Somewhat disagree", 
+                                     "Neither agree nor disagree", 
+                                     "Somewhat agree", 
+                                     "Strongly agree")), 
+                      breaks = rev(palette$color), 
+                      guide = "legend") +
+  
+  theme_fivethirtyeight() +
+  
+  coord_flip() +
+  
+  labs(title = title, 
+       subtitle = subtitle, 
+       y = "", 
+       x = "Percent respondents (n = 76)") +
+  
+  theme(plot.title = element_text(size = 14, hjust = 0),
+        plot.subtitle = element_text(size = 12, face = "italic", hjust = 0),
+        axis.text.y = element_text(size = 11, face = 'bold', hjust = .5),
+        legend.position = "right",
+        legend.direction = "vertical",
+        legend.key.size = unit(.4, "cm"),
+        legend.text = element_text(size = 11)) +
+  
+  scale_y_continuous(breaks = seq(-100 , 100, 25), 
+                     limits = c(-75, 75))
+```
+
+Save the plot to device.
+
+```{r}
+ppi <- 300
+png("likert_plot_with_researchers.png", width = 7 * ppi, height = 4 * ppi, res = ppi)
+p
+dev.off()
+```
+
+#### Without "researchers" question
+
+Again but removing the "researcher" question. Removing from dataframe:
+
+```{r}
+title <- "Prepared for pervasive data protocols?"
+subtitle <- "I believe that IRB members at my institution are well-versed in the\n(technical, ethical) aspects of the collection/use of pervasive data."
+
+p2 <- ggplot() +
+  
+  geom_bar(data = filter(confidence_high, consideration != "researchers_ethical"),
+           aes(x = factor(consideration), y = freq, fill = factor(color)),
+           position = "stack", 
+           stat = "identity", 
+           width = 0.5) +
+  
+  geom_bar(data = filter(confidence_low, consideration != "researchers_ethical"),
+           aes(x = factor(consideration), y = -freq, fill = factor(color)),
+           position = "stack", 
+           stat = "identity", 
+           width = 0.5) +
+  
+  geom_hline(yintercept = 0, color = c("white")) +
+  
+  scale_x_discrete(breaks = c("irb_members_technical", "irb_members_ethical"),
+                   labels = c("Technical", "Ethical")) +
+  
+  scale_fill_identity(name = "Percent respondents (n = 76)", 
+                      labels = rev(c("Strongly disagree", 
+                                     "Somewhat disagree", 
+                                     "Neither agree nor disagree", 
+                                     "Somewhat agree", 
+                                     "Strongly agree")), 
+                      breaks = rev(palette$color), 
+                      guide = "legend") +
+  
+  theme_fivethirtyeight() +
+  
+  coord_flip() +
+  
+  labs(title = title, 
+       subtitle = subtitle, 
+       y = "", 
+       x = "Percent respondents (n = 76)") +
+  
+  theme(plot.title = element_text(size = 14, hjust = 0),
+        plot.subtitle = element_text(size = 12, face = "italic", hjust = 0),
+        axis.text.y = element_text(size = 11, face = 'bold', hjust = .5),
+        legend.position = "right",
+        legend.direction = "vertical",
+        legend.key.size = unit(.4, "cm"),
+        legend.text = element_text(size = 11)) +
+  
+  scale_y_continuous(breaks = seq(-100 , 100, 25), 
+                     limits = c(-75, 75))
+
+ppi <- 300
+png("likert_plot_no_researchers.png", width = 7 * ppi, height = 4 * ppi, res = ppi)
+p2
+dev.off()
+```
+
+
+### IRB has policy for pervasive data
+
+```{r}
+q <- "Does your IRB have a specific checklist, review tool, policy or\nguidelines for reviewing protocols that rely on pervasive data?"
+
+bar_plot(survey, 
+         irb_has_policy_for_pervasive_data,
+         title = "IRB Policy",
+         subtitle = q)
+```
+
+
+```{r}
+bar_plot(survey, 
+         irb_policy_for_pervasive_data_usefulness,
+         title = "IRB policy usefulness",
+         subtitle = "How would you evaluate the usefulness of these policies or documents?")
+```
+
+### IRB Guidelines
+
+
+```{r}
+text_responses(survey, irb_guidelines_other_text)
+```
+
+
+### Institution trains researchers/IRB members
+
+```{r}
+bar_plot(survey, 
+         institution_trains_researchers_pervasive_data_ethics,
+         title = "Training for Researchers",
+         subtitle = "Does your institution provide specific training sessions for RESEARCHERS\nthat addresses the ethics of the collection/use of pervasive data?")
+```
+
+```{r}
+bar_plot(survey, 
+         institution_trains_irb_members_pervasive_data_ethics,
+         title = "Training for IRB Members",
+         subtitle = "Does your institution provide specific training sessions for IRB MEMBERS\nthat addresses the ethics of the collection/use of pervasive data?")
+```
+
+### IRB implemented changes to common rule
+
+```{r}
+bar_plot(survey, 
+         irb_implemented_changes_to_common_rule,
+         title = "Common Rule Implemented",
+         subtitle = "Has your IRB already implemented changes to the Common Rule?")
+```
+
+## Case Studies
+

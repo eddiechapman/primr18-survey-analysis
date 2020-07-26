@@ -1,0 +1,316 @@
+---
+title: "Case study analysis"
+author: "Eddie Chapman"
+date: "2/26/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r libraries}
+library(RColorBrewer)
+library(tidyverse)
+library(treemap)
+```
+```{r import_data}
+survey <- read_rds('data/survey_data.rds')
+```
+
+# Data Cleaning
+
+Filter columns down to respondant ID, key factors, and IRB determination for each case study.
+
+Transform the data into long form as: ID, case study #, irb determination, key factor (one factor chosen by one respondent for this case study).
+
+I separated the original survey data into a `determination` dataframe and a `key_factors` dataframe. I was having trouble with `pivot_longer` creating a duplicate `case_study` column using the various column labels. 
+
+```{r data_cleaning}
+determination <- survey %>%
+  select(id, ends_with("irb_would_consider_proposal")) %>%
+  pivot_longer(ends_with("irb_would_consider_proposal"), 
+               names_to = "case_study",
+               names_pattern = "c(\\d+)_.+",
+               values_to = "irb_determination",
+               values_drop_na = TRUE) %>%
+  mutate_if(is.character, as.factor)
+
+key_factors <- survey %>%
+  select(id, contains("key_factor"), -contains("other_text")) %>%
+  pivot_longer(contains("key_factor"),
+               names_to = c("case_study", "key_factor"),
+               names_pattern = "c(\\d+)_key_factor_(.*)",
+               values_to = "response",
+               values_drop_na = TRUE) %>%
+  filter(response == TRUE) %>%
+  select(-response) %>%
+  mutate_if(is.character, as.factor)
+```
+
+Join them into a single dataframe and discard the unused dataframes.
+
+```{r}
+case_studies <- determination %>%
+  left_join(key_factors, by = c("id", "case_study"))
+
+rm(key_factors, determination)
+
+case_studies
+```
+
+The `NA` value in row 1 needs to be addressed. `NA`s indicate that a respondent filled out the `irb_determination` question without choosing any key factors. An option of "other" should be chosen in this situation. 
+
+We'll remove the `NA`s in the `key_factor` column.
+
+```{r data_cleaning_NAs}
+# NAs in key_factor means that respondant answered irb_determination
+# question but did not offer any key factors. Dropping these.
+case_studies <- case_studies %>%
+  filter(!is.na(key_factor))
+```
+
+## Analysis
+
+Top 5 factors and their counts per determination, per case study
+
+```{r}
+tree <- case_studies %>% 
+  select(-id) %>%
+  mutate(
+    irb_determination = fct_recode(
+      irb_determination,
+      "Exempt" = "exempt",
+      "Expedited" = "expedited",
+      "Not human subjects research" = "not human subjects research",
+      "Full review" = "full review"),
+    key_factor = fct_recode(
+      key_factor,
+       "Public vs. private site" = "public_or_private_site",
+       "Public vs. private data" = "public_or_private_data",
+       "Level of analysis" = "level_of_analysis",
+       "Identifiable data" = "pid",
+       "Terms of service" = "tos",
+       "Data reuse" = "data_reuse",
+       "Combines datasets" = "combine_dataset",
+       "Method of obtaining data" = "method_obtain_data",
+       "Type of data" = "type_of_data",
+       "Obtains informed consent" = "informed_consent",
+       "Purpose of the research" = "research_purpose",
+       "Impact beyond participants" = "research_impact",
+       "Other" = "other")) %>%
+  add_count(case_study, name = "n_case") %>%
+  add_count(case_study, irb_determination, name = "n_determination") %>%
+  add_count(case_study, irb_determination, key_factor, name = "n_factor") %>%
+  select(
+    case_study, 
+    n_case, 
+    irb_determination, 
+    n_determination, 
+    key_factor, 
+    n_factor) %>%
+  arrange(
+    case_study, 
+    desc(n_determination), 
+    irb_determination, 
+    desc(n_factor), 
+    key_factor) %>%
+  group_by(case_study, irb_determination) %>%
+  top_frac(.5, wt = n_factor) %>%
+  count(case_study, irb_determination, key_factor) %>%
+  arrange(
+    case_study, 
+    irb_determination, 
+    desc(n), 
+    key_factor)
+
+tree
+  
+```
+
+Top 5 factors and their counts per determination
+
+```{r}
+case_studies %>%
+  count(irb_determination, key_factor)
+```
+
+```{r}
+case_studies %>%
+  select(case_study, key_factor, irb_determination, -id) %>%
+  add_count(case_study, key_factor, name = "per_case") %>%
+  add_count(case_study, irb_determination, key_factor, 
+            name = "per_determination") %>%
+  mutate(percent = per_determination / per_case) %>%
+  unique() %>%
+  arrange(case_study, key_factor) 
+```
+
+## Treeplots
+
+This is a way to visualize the breakdown between IRB determinations for each case study and the factors that influenced them. 
+
+
+Per case study, the percentage of each key factor that was included in each determination
+
+Not looking at how many people chose a given determination - just what caused them to do so.
+
+Need:
+
+- # of key factors chosen per determination per case study
+- # of times a given factor was chosen per determination per case study
+- # of times a given factor was chosen per case study
+
+```{r data_for_treeplots}
+# tree <- case_studies %>%
+#   select(case_study, irb_determination, key_factor, -id) %>%
+#   add_count(case_study, key_factor, name = "per_case") %>%
+#   add_count(case_study, irb_determination, key_factor, 
+#             name = "per_determination") %>%
+#   mutate(percent = per_determination / per_case,
+#          key_factor = fct_recode(
+#            key_factor,
+#            "Public vs. private site" = "public_or_private_site",
+#            "Public vs. private data" = "public_or_private_data",
+#            "Level of analysis" = "level_of_analysis",
+#            "Identifiable data" = "pid",
+#            "Terms of service" = "tos",
+#            "Data reuse" = "data_reuse",
+#            "Combines datasets" = "combine_dataset",
+#            "Method of obtaining data" = "method_obtain_data",
+#            "Type of data" = "type_of_data",
+#            "Obtains informed consent" = "informed_consent",
+#            "Purpose of the research" = "research_purpose",
+#            "Impact beyond participants" = "research_impact",
+#            "Other" = "other")) %>%
+#   unique() %>%
+#   arrange(case_study, irb_determination, desc(per_determination)) %>%
+#   group_by(case_study, irb_determination) %>%
+#   top_frac(0.5, wt = per_determination)
+# 
+# tree
+```
+
+Saving the titles as variables for use in plotting.
+
+```{r case_study_titles}
+title1 <- "1. Scrapping public newspaper comments to predict elections"
+
+title2 <- "2. Scrapping public Twitter feeds to predict risky drug-use behaviors"
+
+title3 <- "3. Analyzing dating site data to infer sexual behavior"
+
+title4 <- "4. Analyzing newspaper comments to understand political views"
+
+title5 <- "5. Collect geolocation data from mobile provider to understand group mobility patterns"
+
+title6 <- "6. Combine mental health data with social media activity"
+
+title7 <- "7. Analyzing preexisting Twitter dataset to study political event"
+
+title8 <- "8. Scraping health forum and combining with Twitter data to predict mental health"
+
+title9 <- "9. Scraping profile photos to predict sexual behavior"
+
+title10 <- "10. Analyze Apple HealthKit data to assess impact of exercise on health"
+
+title11 <- "11. Scrape public Facebook posts to study group-level dynamics"
+```
+
+```{r add_color_to_determination}
+palette = tibble(
+  color = c(
+    brewer.pal(6, "Pastel1")[3],
+    brewer.pal(6, "Pastel1")[6],
+    brewer.pal(6, "Pastel1")[2],
+    brewer.pal(6, "Pastel1")[1]),
+  irb_determination = c(
+    "Exempt", 
+    "Expedited", 
+    "Not human subjects research", 
+    "Full review"))
+
+tree <- tree %>%
+  left_join(palette, by = "irb_determination")
+
+tree
+```
+
+
+```{r plot_treemap_func}
+#
+# Plot and save a treemap for a single case study in the dataset
+#
+plot_treemap <- function(filename, data, case_number, title) {
+  
+  ppi <- 300
+  
+  png(filename, 
+      width = 7 * ppi, 
+      height = 4 * ppi, 
+      res = ppi)
+  
+  tree <- treemap(data %>% filter(case_study == case_number),
+                  index = c("irb_determination", "key_factor"),
+                  vSize = "n",
+                  vColor = "color",
+                  type = "color",
+                  title = title,
+                  title.legend = "Key factor",
+                  bg.labels = 180,
+                  fontsize.labels = c(12, 8),
+                  fontsize.title = 13,
+                  fontsize.legend = 10,
+                  position.legend = "none",
+                  fontface.labels = c("bold.italic", "plain"),
+                  align.labels = list(
+                    c("left", "top"),
+                    c("center", "center")
+                  ),
+                  inflate.labels = FALSE,
+                  palette = "Pastel1",
+                  overlap.labels = 0.25,
+                  border.col = c("black", "black"),
+                  border.lwds = c(2.5, 0.5),
+                  lowerbound.cex.labels = 0.75,
+                  range = c(0, 1),
+                  aspRatio = 1.5)
+  
+  dev.off()
+}
+```
+
+
+```{r plot_trees_and_save}
+plot_treemap(filename = "plots/case-01_news-comments-election.png",
+             data = tree, case_number = 1, title = title1)
+
+plot_treemap(filename = "plots/case-02_twitter-drug-use.png",
+             data = tree, case_number = 2, title = title2)
+
+plot_treemap(filename = "plots/case-03_dating-sites.png", 
+             data = tree, case_number = 3, title = title3)
+
+plot_treemap(filename = "plots/case-04_news-comments-political-views.png",
+             data = tree, case_number = 4, title = title4)
+
+plot_treemap(filename = "plots/case-05_group-mobility-patterns.png",
+             data = tree, case_number = 5, title = title5)
+
+plot_treemap(filename = "plots/case-06_mental-health-social-media.png",
+             data = tree, case_number = 6, title = title6)
+
+plot_treemap(filename = "plots/case-07_preexisting-twitter-political-event.png",
+             data = tree,case_number = 7, title = title7)
+
+plot_treemap(filename = "plots/case-08_health-forum-plus-twitter-mental-health.png",
+             data = tree, case_number = 8, title = title8)
+
+plot_treemap(filename = "plots/case-09_profile-pics-sexual-behavior.png",
+             data = tree, case_number = 9, title = title9)
+
+plot_treemap(filename = "plots/case-10_apple-health-kit.png",
+             data = tree, case_number = 10, title = title10)
+
+plot_treemap(filename = "plots/case-11_public-facebook-group-dynamics.png",
+             data = tree, case_number = 11, title = title11)
+```
